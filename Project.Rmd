@@ -1,0 +1,166 @@
+---
+title: "**Predicting human body posture and movement by using Random Forest Method**"
+author: "Hum N. Bhandari"
+date: "11/22/2015"
+output: html_document
+---
+##**Overview**
+In this project we use random forest method to develop  machine learning model to predict the human acitivity.Only 52 related features were selected after all necessary cleaning procedure.Random forest method was selected because it gave higher accurary in  training set, crossvalidation set and testing set.This model has very low out of sample error **0.0050979**.To train this model,
+train() function was used from caret package with repeated cross validation and elapsed time for training process was **23.09 min**
+
+
+
+###**Downloading reading  and Cleaning Data**
+
+**Loading related libraries**
+
+we used caret package to apply some built in mahine learning function like train() etc
+
+```{r,cache=TRUE}
+library(caret)
+```
+
+**Downloading Data**
+
+Training data set and test data set were downloaded using R function download.file().
+We are making eval = FALSE to avoid download again.
+
+```{r,cache=TRUE,eval=FALSE}
+Training_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(Training_url,destfile = "pml-training.csv",method = "wget")
+Test_url<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(Test_url,destfile="pml-testing.csv",method="wget")
+```
+
+**Loading data**
+```{r,cache=TRUE}
+trainData  <- read.csv("pml-training.csv",  header = T,na.strings = c("","NA","#DIV/0!"))
+testData   <- read.csv("pml-testing.csv",header = T,na.strings = c("","NA","#DIV/0!"))  
+```
+
+Downloaded data was loaded using read.csv() functions by considering "", "NA", and "#DIV/0
+!" as na.strings.
+
+**Cleaning Data**
+
+```{r,cache=TRUE}
+trainData <-trainData[,-(1:7)]
+testData <- testData[,-(1:7)]
+sensorTrainColumns <- grep(pattern = "_belt|_arm|_dumbbell|_forearm",colnames(trainData))
+sensorTestColumns <- grep(pattern = "_belt|_arm|_dumbbell|_forearm",colnames(testData))
+trainData <- trainData[, c(sensorTrainColumns,153)]
+testData <- testData[,c(sensorTestColumns,153)]
+```
+
+- I decided to remove first 7 columns of data because these columns do not have important informantion for our project
+- Inportant information for our project  are column names like belt, arm, dumbell , forearm.So, only these columns were extracted to make smaller training and test  datasets.
+- This resulted data set with 153 column size
+
+**Handling missing data**
+
+```{r,cache=TRUE}
+  train_good_columns <- colSums(is.na(trainData)) < nrow(trainData)-1000
+  test_good_columns  <- colSums(is.na(testData))  < nrow(testData)
+  trainData <- trainData[,train_good_columns]
+  testData <- testData[,test_good_columns]
+  #dim(trainData) ; ans= 19622    53 ;  dim(testData) ; ans =20 53
+  #sum(is.na(trainData));sum(is.na(testData)) // Here results are zero means no more NAs
+  
+  #===Checking near zero variance===#
+  near_zero_var <- nearZeroVar(trainData,saveMetrics=TRUE)
+  if (any(near_zero_var$nzv)) nzv else 
+    message(" No Probem!! there are no  variables with near zero variance")
+```
+
+One of the major problem in both training and test data sets is that there are many columns in which almost all entries are NAs.We are applying follwing technique to solve this problem
+
+- I found that 100 columns of test data set had all entries NAs and they were removed
+- In Training sets these 100 columns had very few non NAs entries(less than 1000).So they were also removed 
+- This process reduced column size to only 53
+- I also checked for variable with near zero variance but it turned out that there were no such variables
+
+**New Training and Cross Vlidation data sets**
+
+```{r,cache=TRUE}
+InTrain <- createDataPartition(trainData$classe,p=0.75,list=FALSE)
+training_set <- trainData[InTrain,]
+crv_set      <- trainData[-InTrain,]
+dim(training_set); dim(crv_set)
+```
+
+- Now this clean data with 53 features were further divided into training set and cross validation set in the ratio of 75% to 25% 
+- Cross validation set was created to see the out-of sample error before using this model to test set
+
+##Training  by Random Forest 
+
+```{r,cache=TRUE,eval=TRUE}
+starting_time <- proc.time()
+Control <- trainControl(method = "repeatedcv",number = 5)
+modelFit <- train(classe ~.,data = training_set, method="rf", trControl = Control)
+ending_time <- proc.time()
+time_required <- ending_time- starting_time
+modelFit
+time_required
+```
+
+- Training set was used to  train the model by train() function and "rf"(random forest) method with  repeated cross validation process (5 times)
+
+- I used train() function from caret package.I found this process little bit slow but not too bad(see required time below)
+- I also tried RandomForest() function available in RandomForest package and compared their required time and accuracy.RandomForest() function was faster than train() function.However, accurary of both methods was very similar.
+
+- Required time was **`r round((time_required[3]/60),2)`mins**
+
+
+##**Cross Validating the Model**
+
+```{r,cache=TRUE}
+crv_predictions <- predict(modelFit,crv_set)
+confusionMatrix(crv_predictions,crv_set$classe)
+out_sample_error <- sum(crv_predictions != crv_set$classe)/nrow(crv_set)
+```
+
+- This model gave very good prediction not only in training set but also in cross validation set
+- Out of sample  error  was **`r out_sample_error`**
+
+##**Saving the Model for future use**
+
+```{r,cache=TRUE}
+saveRDS(modelFit,"modelFit.RDS")
+model = readRDS("modelFit.RDS")
+answers <- predict(model,testData)
+```
+
+##**Plotting**
+Although random model is not good in the sense of interpretability, we can grave some information about important features using varImp() funtion
+
+```{r,cache=TRUE}
+plot( varImp(model),col="red")
+
+```
+
+###**Results submission**
+
+```{r,cache=TRUE}
+answers <- predict(model,testData)
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(answers)
+
+```
+
+- I used this model to testing set available as submission part of this project and it gave 100% accurate results
+
+##**References**
+
+- Data Science Specializaton course in [Practical Machine Learning](https://www.coursera.org/course/predmachlearn) offered by Coursrea and John Hopkins University
+- Data set was used from [Groupware](http://groupware.les.inf.puc-rio.br/har)
+- Original paper is [Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligenc](http://groupware.les.inf.puc-rio.br/work.jsf?p1=10335)
+
+
+
